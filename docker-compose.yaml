@@ -1,0 +1,71 @@
+# A self-contained environment for trying the image out: PostgreSQL, MinIO as a
+# stand-in for S3, and the backup container itself.
+#
+#   docker compose up -d --build
+#   docker compose exec backup sh backup.sh
+#   docker compose exec backup sh restore.sh
+#
+# MinIO's console is on http://localhost:9001 (minioadmin / minioadmin).
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: demo
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d demo']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  create-bucket:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "mc alias set local http://minio:9000 minioadmin minioadmin &&
+             mc mb --ignore-existing local/backups"
+
+  backup:
+    build:
+      context: .
+      args:
+        POSTGRES_MAJOR: 17
+        ALPINE_VERSION: '3.22'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      create-bucket:
+        condition: service_completed_successfully
+    environment:
+      SCHEDULE: '@daily'
+      BACKUP_KEEP_DAYS: 7
+      PASSPHRASE: demo-passphrase
+      POSTGRES_HOST: postgres
+      POSTGRES_DATABASE: demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_BUCKET: backups
+      S3_PREFIX: backup
+      S3_REGION: us-east-1
