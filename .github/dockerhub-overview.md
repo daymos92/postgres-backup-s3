@@ -108,6 +108,34 @@ The schedule is parsed by [robfig/cron v3](https://pkg.go.dev/github.com/robfig/
 the seconds field is optional, so both five- and six-field expressions are
 accepted.
 
+## Database privileges
+
+`backup.sh` only reads. `pg_dump` opens its transaction with
+`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY` and takes
+`ACCESS SHARE` locks, which do not block reads or writes and conflict only with
+DDL such as `DROP`, `ALTER` and `TRUNCATE`. Nothing in the scheduled path writes
+to the database: `run.sh` invokes `backup.sh` and nothing else.
+
+Restoring is the destructive operation, and it runs only when someone invokes
+`restore.sh` by hand.
+
+For a deployment that only takes backups, use a role that cannot write, so the
+guarantee comes from the server rather than from what the scripts happen to do:
+
+```sql
+CREATE ROLE backup LOGIN PASSWORD '...';
+GRANT pg_read_all_data TO backup;   -- PostgreSQL 14 and later
+```
+
+That is enough for a full `--format=custom` dump. Restoring needs write access
+and ownership of the objects being replaced, so it fails with this role, which
+is the intent.
+
+One exception: if a table has row-level security enabled, a dump by a
+non-superuser fails with `query would be affected by row-level security policy`
+instead of quietly writing a partial dump. Backing up those tables needs a role
+with `BYPASSRLS`.
+
 ## Notes
 
 - A failing scheduled backup is logged, but go-cron neither exits nor changes
