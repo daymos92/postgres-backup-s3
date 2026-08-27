@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        # One row per published major. `latest` marks the newest one; exactly
+        # one row should carry it. Alpine releases carrying a given client, as
+        # of writing: 3.21 and 3.22 have 15-17, 3.23 has 16-18.
         include:
           - { postgres: '17', alpine: '3.22', latest: true }
 

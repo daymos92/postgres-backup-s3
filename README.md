@@ -1,9 +1,10 @@
-# postgres17-backup-s3
+# postgres-backup-s3
 
 A Docker image that dumps a PostgreSQL database to S3-compatible object storage
 on a schedule, and restores from those dumps. It contains `pg_dump` and
-`pg_restore` from the PostgreSQL 17 client, the AWS CLI, GnuPG and
-[go-cron](https://github.com/ivoronin/go-cron), on Alpine.
+`pg_restore`, the AWS CLI, GnuPG and
+[go-cron](https://github.com/ivoronin/go-cron), on Alpine. The image tag
+selects the PostgreSQL major version.
 
 Published to Docker Hub as
 [`daymos92/postgres-backup-s3`](https://hub.docker.com/r/daymos92/postgres-backup-s3),
@@ -119,9 +120,14 @@ accepted.
 | --- | --- | --- |
 | `17`, `latest` | 17 | Alpine 3.22 |
 
-The tag is the major version of the PostgreSQL *client tools* in the image.
-`pg_dump` refuses to dump a server newer than itself, so choose a tag greater
-than or equal to the server's major version.
+The tag is the major version of the PostgreSQL *client tools* in the image, not
+a release number of this project; `latest` follows the newest major published
+here. `pg_dump` refuses to dump a server newer than itself, so choose a tag
+greater than or equal to the server's major version.
+
+Publishing another major is a row in the matrix in
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml), paired with an
+Alpine release that packages the matching client.
 
 ## Notes
 

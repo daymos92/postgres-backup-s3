@@ -1,10 +1,11 @@
 A Docker image that dumps a PostgreSQL database to S3-compatible object storage
 on a schedule, and restores from those dumps. It contains `pg_dump` and
-`pg_restore` from the PostgreSQL 17 client, the AWS CLI, GnuPG and
-[go-cron](https://github.com/ivoronin/go-cron), on Alpine.
+`pg_restore`, the AWS CLI, GnuPG and
+[go-cron](https://github.com/ivoronin/go-cron), on Alpine. The image tag selects
+the PostgreSQL major version.
 
 Source, issues and full documentation:
-[github.com/daymos92/postgres17-backup-s3](https://github.com/daymos92/postgres17-backup-s3).
+[github.com/daymos92/postgres-backup-s3](https://github.com/daymos92/postgres-backup-s3).
 
 ## Tags
 
@@ -12,9 +13,10 @@ Source, issues and full documentation:
 | --- | --- | --- | --- |
 | `17`, `latest` | 17 | Alpine 3.22 | `linux/amd64`, `linux/arm64` |
 
-The tag is the major version of the PostgreSQL *client tools* in the image.
-`pg_dump` refuses to dump a server newer than itself, so choose a tag greater
-than or equal to the server's major version.
+The tag is the major version of the PostgreSQL *client tools* in the image, not
+a release number of this project; `latest` follows the newest major published
+here. `pg_dump` refuses to dump a server newer than itself, so choose a tag
+greater than or equal to the server's major version.
 
 ## Usage
 
@@ -133,6 +135,6 @@ The environment variables are unchanged, so it is a drop-in replacement, except
 that `S3_PATH` is gone: it was declared in upstream's Dockerfile but never read
 by the scripts, which have always used `S3_PREFIX`. The full list of behavioural
 differences is in the
-[README](https://github.com/daymos92/postgres17-backup-s3#relation-to-upstream).
+[README](https://github.com/daymos92/postgres-backup-s3#relation-to-upstream).
 
 MIT.
