@@ -40,6 +40,7 @@ jobs:
             type=raw,value=latest,enable=${{ matrix.latest }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.description=Scheduled PostgreSQL dumps to S3-compatible object storage, with restore
 
       - uses: docker/build-push-action@v7
         with:
