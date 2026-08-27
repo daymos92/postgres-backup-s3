@@ -1,15 +1,17 @@
-# postgres-backup-s3
+# postgres17-backup-s3
 
 A Docker image that dumps a PostgreSQL database to S3-compatible object storage
 on a schedule, and restores from those dumps. It contains `pg_dump` and
 `pg_restore` from the PostgreSQL 17 client, the AWS CLI, GnuPG and
 [go-cron](https://github.com/ivoronin/go-cron), on Alpine.
 
+Published to Docker Hub as
+[`daymos92/postgres-backup-s3`](https://hub.docker.com/r/daymos92/postgres-backup-s3),
+for `linux/amd64` and `linux/arm64`.
+
 ```
 docker pull daymos92/postgres-backup-s3:17
 ```
-
-Built for `linux/amd64` and `linux/arm64`.
 
 ## Usage
 
