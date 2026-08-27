@@ -1,20 +1,17 @@
 # postgres-backup-s3
 
-Periodically dump a PostgreSQL 17 database to S3-compatible object storage, and
-restore it again when you need to. One small Alpine image does both.
+A Docker image that dumps a PostgreSQL database to S3-compatible object storage
+on a schedule, and restores from those dumps. It contains `pg_dump` and
+`pg_restore` from the PostgreSQL 17 client, the AWS CLI, GnuPG and
+[go-cron](https://github.com/ivoronin/go-cron), on Alpine.
 
 ```
 docker pull daymos92/postgres-backup-s3:17
 ```
 
-- `pg_dump` in PostgreSQL's own `custom` format, so `pg_restore` can be selective
-- Any S3-compatible backend: AWS S3, MinIO, Backblaze B2, Cloudflare R2, Hetzner
-- Optional symmetric GPG encryption before upload
-- Optional retention: delete this database's backups older than N days
-- Cron-style scheduling, or a single run that exits
-- `linux/amd64` and `linux/arm64`, running as an unprivileged user
+Built for `linux/amd64` and `linux/arm64`.
 
-## Backup
+## Usage
 
 ```yaml
 services:
@@ -41,12 +38,14 @@ services:
       S3_PREFIX: backup
 ```
 
-Backups are uploaded as `s3://$S3_BUCKET/$S3_PREFIX/<database>_<timestamp>.dump`,
-where the timestamp is UTC in ISO-8601 form — for example
-`backup/dbname_2026-08-27T03:00:11.dump`. With `PASSPHRASE` set, `.gpg` is
-appended.
+Objects are written to
+`s3://$S3_BUCKET/$S3_PREFIX/<database>_<timestamp>.dump`, with the timestamp in
+UTC ISO-8601 form, for example `backup/dbname_2026-08-27T03:00:11.dump`. When
+`PASSPHRASE` is set, `.gpg` is appended to the key.
 
-To take a backup right now, without waiting for the schedule:
+If `SCHEDULE` is unset the container takes one backup and exits, which is useful
+under an external scheduler. To run a backup on demand in a scheduled
+container:
 
 ```bash
 docker compose exec backup sh backup.sh
@@ -54,20 +53,23 @@ docker compose exec backup sh backup.sh
 
 ## Restore
 
-> [!CAUTION]
-> Restoring drops and re-creates every object in the target database.
+Restoring runs `pg_restore --clean --if-exists`, which drops and re-creates
+every object the dump contains.
 
-From the most recent backup:
+From the most recent backup of `$POSTGRES_DATABASE`:
 
 ```bash
 docker compose exec backup sh restore.sh
 ```
 
-From a specific one, using the timestamp out of the object key:
+From a specific backup, using the timestamp from the object key:
 
 ```bash
 docker compose exec backup sh restore.sh 2026-08-27T03:00:11
 ```
+
+`PASSPHRASE` must match the one the backup was taken with; the script looks for
+`.dump.gpg` when it is set and `.dump` when it is not.
 
 ## Configuration
 
@@ -80,48 +82,68 @@ docker compose exec backup sh restore.sh 2026-08-27T03:00:11
 | `POSTGRES_DATABASE` | | required |
 | `POSTGRES_USER` | | required |
 | `POSTGRES_PASSWORD` | | required |
-| `PGDUMP_EXTRA_OPTS` | | extra flags passed straight to `pg_dump`, e.g. `--schema=public` |
+| `PGDUMP_EXTRA_OPTS` | | passed through to `pg_dump`, for example `--schema=public` |
 
 ### Object storage
 
 | Variable | Default | |
 | --- | --- | --- |
 | `S3_BUCKET` | | required |
-| `S3_PREFIX` | `backup` | key prefix within the bucket; may be empty |
+| `S3_PREFIX` | `backup` | key prefix inside the bucket; may be empty |
 | `S3_REGION` | `us-east-1` | |
-| `S3_ACCESS_KEY_ID` | | omit to use the instance role or `~/.aws` |
-| `S3_SECRET_ACCESS_KEY` | | omit to use the instance role or `~/.aws` |
-| `S3_ENDPOINT` | | set for anything that is not AWS S3, e.g. `https://s3.us-west-004.backblazeb2.com` |
-| `S3_S3V4` | `no` | set to `yes` to force SigV4 signing |
+| `S3_ACCESS_KEY_ID` | | leave unset to use an instance role or a mounted `~/.aws` |
+| `S3_SECRET_ACCESS_KEY` | | as above |
+| `S3_ENDPOINT` | | required for non-AWS providers, for example `https://s3.us-west-004.backblazeb2.com` |
+| `S3_S3V4` | `no` | `yes` forces SigV4 signing |
 
-### Behaviour
+The test setup in this repository runs against MinIO. Any provider the AWS CLI
+can talk to should work; set `S3_ENDPOINT` for anything other than AWS S3.
+
+### Scheduling and retention
 
 | Variable | Default | |
 | --- | --- | --- |
-| `SCHEDULE` | | [go-cron schedule](https://pkg.go.dev/github.com/robfig/cron#hdr-Predefined_schedules), e.g. `@daily` or `0 30 3 * * *`. Omit to back up once and exit. |
-| `PASSPHRASE` | | encrypt the dump with GPG (AES-256) before upload |
-| `BACKUP_KEEP_DAYS` | | delete this database's backups older than this many days |
+| `SCHEDULE` | | cron expression or descriptor, for example `@daily`, `30 3 * * *`, `0 30 3 * * *`. Unset means a single run. |
+| `PASSPHRASE` | | symmetric GPG encryption (AES-256) before upload |
+| `BACKUP_KEEP_DAYS` | | delete backups of this database older than N days |
 
-`BACKUP_KEEP_DAYS` only removes keys that start with
-`$S3_PREFIX/$POSTGRES_DATABASE_`, so several databases can share one prefix
-without deleting each other's backups. It relies on the object's
-`LastModified` time, which means server-side copies or re-uploads reset the
-clock.
+The schedule is parsed by [robfig/cron v3](https://pkg.go.dev/github.com/robfig/cron/v3#hdr-CRON_Expression_Format);
+the seconds field is optional, so both five- and six-field expressions are
+accepted.
 
 ## Tags
 
-| Tag | PostgreSQL | Base |
+| Tag | PostgreSQL client | Base |
 | --- | --- | --- |
 | `17`, `latest` | 17 | Alpine 3.22 |
 
-The tag tracks the major version of the PostgreSQL *client tools* in the image.
-`pg_dump` refuses to dump a server newer than itself, so pick a tag at or above
-your server's major version.
+The tag is the major version of the PostgreSQL *client tools* in the image.
+`pg_dump` refuses to dump a server newer than itself, so choose a tag greater
+than or equal to the server's major version.
 
-## Development
+## Notes
 
-The Compose file in this repository brings up PostgreSQL, MinIO as a local
-stand-in for S3, and the backup container, wired together:
+- A failing scheduled backup is logged, but go-cron neither exits nor changes
+  the container's status. Watch the logs or the age of the newest object in the
+  bucket; do not treat a running container as evidence that backups are
+  succeeding.
+- `pg_dump` covers one database. Cluster-wide objects such as roles and
+  tablespaces are not included, so a restore into an empty cluster needs those
+  re-created first.
+- The dump is written to the container filesystem before upload, so the
+  container needs free space for one full dump.
+- `BACKUP_KEEP_DAYS` only deletes keys beginning with
+  `$S3_PREFIX/$POSTGRES_DATABASE_`, so several databases can share a prefix
+  without deleting each other's backups. It compares against the object's
+  `LastModified` time rather than the timestamp in the key, so a server-side
+  copy or re-upload resets the clock.
+- Backups are not verified after upload beyond the AWS CLI's own integrity
+  checks. Restoring into a scratch database periodically is the only real test.
+
+## Building
+
+The Compose file in this repository runs PostgreSQL, MinIO in place of S3, and
+the backup container:
 
 ```bash
 docker compose up -d --build
@@ -129,41 +151,48 @@ docker compose exec backup sh backup.sh
 docker compose exec backup sh restore.sh
 ```
 
-MinIO's console is at http://localhost:9001 (`minioadmin` / `minioadmin`).
+The MinIO console is at http://localhost:9001 (`minioadmin` / `minioadmin`).
 
-Build the image on its own:
+To build the image alone:
 
 ```bash
 docker build -t postgres-backup-s3:17 .
 ```
 
-`POSTGRES_MAJOR` and `ALPINE_VERSION` are build arguments, so other
-combinations are possible as long as Alpine packages the client for that
-version — `--build-arg POSTGRES_MAJOR=16`, for instance.
+`POSTGRES_MAJOR`, `ALPINE_VERSION` and `GO_CRON_VERSION` are build arguments.
+Other PostgreSQL versions build as long as the Alpine release packages the
+matching client, for example `--build-arg POSTGRES_MAJOR=16`.
 
-## Credits
+The shell scripts are checked with `shellcheck -x -s sh src/*.sh`.
+
+## Relation to upstream
 
 A fork of [eeshugerman/postgres-backup-s3](https://github.com/eeshugerman/postgres-backup-s3),
-itself derived from [schickling/dockerfiles](https://github.com/schickling/dockerfiles/tree/master/postgres-backup-s3).
-Scheduling is handled by [ivoronin/go-cron](https://github.com/ivoronin/go-cron).
+which in turn derives from
+[schickling/dockerfiles](https://github.com/schickling/dockerfiles/tree/master/postgres-backup-s3).
+The environment variables are unchanged, so it is a drop-in replacement, except
+that `S3_PATH` is gone: it was declared in upstream's Dockerfile but never read
+by the scripts, which have always used `S3_PREFIX`.
 
-Changes made here:
+Behavioural differences:
 
-- PostgreSQL 17 client on Alpine 3.22, with the client package pinned by major
-  version rather than inherited from whatever Alpine happens to ship
-- runs as an unprivileged user
-- the go-cron download is checksum-verified at build time and fetched on the
-  build platform, so cross-platform builds do not run it under emulation
-- `S3_PREFIX` is honoured by the image (upstream declared `S3_PATH` while the
-  scripts read `S3_PREFIX`), and an empty prefix no longer produces `//` in keys
-- retention is scoped to the database being backed up instead of the whole
-  prefix, and no longer tries to delete a key literally named `None` when
-  nothing matches
-- "restore latest" sorts server-side, so it is not limited to the first 1000
-  objects a single `s3 ls` returns
-- credentials are no longer declared as empty `ENV` defaults in the image
-- dump files are cleaned up even when a step fails
+- The PostgreSQL client package is pinned by major version instead of following
+  whatever the Alpine release happens to make default.
+- `BACKUP_KEEP_DAYS` deletes only the backups of `$POSTGRES_DATABASE`. Upstream
+  deletes everything under `$S3_PREFIX`, including other databases' backups,
+  and passes a literal `None` to `s3 rm` when nothing matches.
+- Restoring the latest backup sorts server-side, instead of taking the last
+  line of a single `s3 ls`, which silently missed newer backups once a bucket
+  held more than 1000 objects.
+- An empty `S3_PREFIX` no longer produces a double slash in object keys.
+- The container runs as an unprivileged user.
+- The go-cron download is checksum-verified, and happens on the build platform
+  rather than under emulation during cross-platform builds.
+- Credentials are no longer declared as empty `ENV` defaults, so they do not
+  appear in `docker inspect` output for the image.
+- Timestamps in object keys are explicitly UTC.
+- Partial dump files are removed when a step fails.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

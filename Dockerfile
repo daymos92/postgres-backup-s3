@@ -21,11 +21,15 @@ LABEL org.opencontainers.image.title="postgres-backup-s3" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.source="${SOURCE_URL}"
 
+# Package versions are deliberately not pinned: Alpine drops older revisions
+# from its index, so a pin turns the next security update into a build failure.
+# The Alpine minor release in ALPINE_VERSION is what keeps this reproducible.
+# hadolint ignore=DL3018
 RUN apk add --no-cache \
       "postgresql${POSTGRES_MAJOR}-client" \
       gnupg \
       aws-cli \
- && adduser -D -h /home/backup backup \
+ && adduser -D -u 1000 -h /home/backup backup \
  && mkdir -p /backup \
  && chown backup:backup /backup
 
@@ -41,6 +45,7 @@ ENV POSTGRES_PORT="5432" \
 WORKDIR /backup
 COPY src/env.sh src/run.sh src/backup.sh src/restore.sh ./
 
-USER backup
+# Numeric, so that Kubernetes can satisfy runAsNonRoot without a lookup.
+USER 1000:1000
 
 CMD ["sh", "run.sh"]
